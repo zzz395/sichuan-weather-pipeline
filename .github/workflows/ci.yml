@@ -294,13 +294,22 @@ jobs:
           Remove-Item Env:PIP_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
           Remove-Item Env:PIP_FIND_LINKS -ErrorAction SilentlyContinue
 
+          if ($IsLinux) {
+            $RunnerUid = (& id -u).Trim()
+            $RunnerGid = (& id -g).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "cannot determine the hosted runner identity"
+            }
+          }
+
           function Invoke-W3Command {
             param(
               [Parameter(Mandatory = $true)][string]$Executable,
               [Parameter(Mandatory = $true)][string[]]$Arguments
             )
             if ($IsLinux) {
-              & unshare --user --map-root-user --net -- $Executable @Arguments
+              & sudo --non-interactive --preserve-env unshare --net `
+                --setuid $RunnerUid --setgid $RunnerGid -- $Executable @Arguments
             } else {
               & $Executable @Arguments
             }
@@ -335,9 +344,13 @@ jobs:
           }
 
           if ($IsLinux) {
-            & unshare --user --map-root-user --net -- true
+            $NamespaceUid = (& sudo --non-interactive --preserve-env unshare `
+              --net --setuid $RunnerUid --setgid $RunnerGid -- id -u).Trim()
             if ($LASTEXITCODE -ne 0) {
               throw "an independent no-network namespace is unavailable"
+            }
+            if ($NamespaceUid -ne $RunnerUid) {
+              throw "the isolated command identity differs from the runner identity"
             }
           }
 
