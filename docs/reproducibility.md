@@ -9,15 +9,15 @@ deterministic outputs, contract coverage, and offline acceptance methodology.
 |---|---|
 | Windows x64 / CPython 3.12 local offline acceptance | PASS |
 | Windows x64 / CPython 3.13 local offline acceptance | PASS |
-| Linux validation | PENDING |
-| Hosted GitHub Actions | NOT RUN |
+| Linux validation | Linux x64 / CPython 3.12 and 3.13 validated in GitHub-hosted Ubuntu with committed hash locks and a network-isolated validation phase. |
+| Hosted GitHub Actions | Windows x64 and Ubuntu x64 / CPython 3.12 and 3.13 completed the full hosted workflow and its same-run cross-target comparison. |
 | Git-mirror fresh-clone acceptance | PENDING |
 | Publication acceptance | PENDING |
 
-These results are limited to the stated Windows targets. They do not establish
-cross-platform or publication acceptance. `.w3/` is an ignored local
-acceptance workspace; its contents are neither public documentation nor
-distribution inputs.
+These results establish only the stated local Windows and GitHub-hosted
+validation scopes. They do not establish Git-mirror fresh-clone or publication
+acceptance. `.w3/` is an ignored local acceptance workspace; its contents are
+neither public documentation nor distribution inputs.
 
 ## Supported targets
 
@@ -142,8 +142,8 @@ failed run is not resumed after online repair.
 
 ## Hosted workflow boundary
 
-The workflow defines Windows and Ubuntu jobs for Python 3.12 and 3.13. It is
-configured to use committed target locks, build a wheelhouse online, and then
-perform restricted local-only installs and validation. Configuration is not an
-execution result: the hosted workflow has not run, and Linux validation remains
-pending.
+The workflow validates Windows and Ubuntu jobs for Python 3.12 and 3.13 using
+committed target locks, an online wheelhouse phase, and restricted local-only
+installation and validation. The Linux jobs run restricted commands inside a
+dedicated network namespace. All four hosted targets and their same-run
+business-output comparison completed successfully for the documented candidate.

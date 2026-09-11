@@ -126,8 +126,8 @@ python -m pytest --import-mode=importlib -p no:cacheprovider -ra tests
 |---|---|
 | Windows x64 / CPython 3.12 local offline acceptance | PASS |
 | Windows x64 / CPython 3.13 local offline acceptance | PASS |
-| Linux validation | PENDING |
-| Hosted GitHub Actions | NOT RUN |
+| Linux validation | Linux x64 / CPython 3.12 and 3.13 validated in GitHub-hosted Ubuntu with committed hash locks and a network-isolated validation phase. |
+| Hosted GitHub Actions | Windows x64 and Ubuntu x64 / CPython 3.12 and 3.13 completed the full hosted workflow and its same-run cross-target comparison. |
 | Git-mirror fresh-clone acceptance | PENDING |
 | Publication acceptance | PENDING |
 
