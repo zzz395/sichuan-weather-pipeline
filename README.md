@@ -148,7 +148,7 @@ behavior rather than Sichuan climate statistics.
 data/sample/           Synthetic manifest and JSONL records
 docs/                  Public contract and reproducibility documentation
 reproducibility/       Explicit candidate-file allowlist
-requirements/          Compatibility baseline and Windows target locks
+requirements/          Compatibility baseline and target-specific locks
 scripts/               Wheelhouse, artifact, and offline acceptance tools
 src/sichuan_weather/   Pipeline package
 tests/                 Contract and packaging tests

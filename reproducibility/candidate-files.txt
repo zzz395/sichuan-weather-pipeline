@@ -12,6 +12,10 @@ docs/reproducibility.md
 pyproject.toml
 reproducibility/candidate-files.txt
 requirements/baseline.in
+requirements/linux-x64-py312/dev.txt
+requirements/linux-x64-py312/runtime.txt
+requirements/linux-x64-py313/dev.txt
+requirements/linux-x64-py313/runtime.txt
 requirements/windows-x64-py312/dev.txt
 requirements/windows-x64-py312/runtime.txt
 requirements/windows-x64-py313/dev.txt

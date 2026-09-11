@@ -23,11 +23,14 @@ distribution inputs.
 
 - `windows-x64-py312`: CPython 3.12, x86-64
 - `windows-x64-py313`: CPython 3.13, x86-64
+- `linux-x64-py312`: CPython 3.12, x86-64
+- `linux-x64-py313`: CPython 3.13, x86-64
 
 The project metadata requires Python `>=3.12,<3.14`. Target-specific hashed
-runtime and development locks are stored under `requirements/`. Linux locks are
-not present; normal CI validation is configured to refuse a target when either
-required lock is absent rather than resolve dependencies implicitly.
+runtime and development locks are stored under `requirements/`. Normal CI
+validation is configured to refuse a target when either required lock is absent
+rather than resolve dependencies implicitly. Committing a lock does not itself
+establish validation for that target.
 
 ## Contract coverage
 
