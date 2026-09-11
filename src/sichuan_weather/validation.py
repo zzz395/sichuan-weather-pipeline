@@ -942,7 +942,11 @@ def _group_quality(
     for record in records:
         overall[(record.snapshot_id, record.location)].append(record)
         monthly[
-            (record.snapshot_id, record.location, record.valid_date.strftime("%Y-%m"))
+            (
+                record.snapshot_id,
+                record.location,
+                f"{record.valid_date.year:04d}-{record.valid_date.month:02d}",
+            )
         ].append(record)
 
     for snapshot in sorted(
