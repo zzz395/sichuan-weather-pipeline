@@ -1,0 +1,57 @@
+# Explicit public source-distribution inventory.
+include README.md
+include pyproject.toml
+include MANIFEST.in
+
+recursive-include src/sichuan_weather *.py
+recursive-include tests *.py
+include data/sample/records.jsonl
+include data/sample/manifest.json
+
+include requirements/baseline.in
+recursive-include requirements *.txt
+
+include scripts/prepare_wheelhouse.py
+include scripts/check_artifacts.py
+include scripts/offline_acceptance.py
+
+include reproducibility/candidate-files.txt
+include docs/reproducibility.md
+include docs/data-contract.md
+include docs/assets/temperature-ranges.png
+include docs/assets/weather-frequency.png
+include .github/workflows/ci.yml
+
+# Local environments, generated output, caches, and non-candidate material.
+prune .w3
+prune .w3*
+prune .venv
+prune venv
+prune env
+prune build
+prune dist
+prune wheelhouse
+prune output
+prune outputs
+prune .git
+prune .pytest_cache
+prune .mypy_cache
+prune .pyright
+prune .ruff_cache
+prune .tox
+prune .nox
+prune pytest-cache-files-*
+prune *.egg-info
+prune src/*.egg-info
+
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .coverage
+global-exclude .coverage.*
+global-exclude *.log
+global-exclude LICENSE
+global-exclude LICENSE.*
+global-exclude LICENCE
+global-exclude LICENCE.*
+global-exclude COPYING
+global-exclude COPYING.*

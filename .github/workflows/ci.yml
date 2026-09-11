@@ -1,0 +1,669 @@
+name: Reproducibility validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run validation or generate review-only Linux lock candidates
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - prepare-linux-locks
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_INPUT: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  prepare-linux-locks:
+    name: Prepare Linux lock candidate (${{ matrix.python-version }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'prepare-linux-locks' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.12"
+            target: linux-x64-py312
+          - python-version: "3.13"
+            target: linux-x64-py313
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up target Python
+        id: target_python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          architecture: x64
+          check-latest: false
+          python-version: ${{ matrix.python-version }}
+
+      - name: Bootstrap the candidate resolver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "${{ steps.target_python.outputs.python-path }}" -I -m pip install `
+            --disable-pip-version-check `
+            "pip>=25,<27" `
+            "pip-tools>=7.4,<8" `
+            "setuptools>=72.1,<82" `
+            "wheel>=0.45,<1" `
+            "build>=1.2,<2" `
+            "packaging>=24,<27"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Generate byte-stable Linux lock candidates
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $CandidateRoot = Join-Path $env:RUNNER_TEMP "linux-lock-candidates"
+          $TargetRoot = Join-Path $CandidateRoot $env:TARGET
+          $SecondRoot = Join-Path $env:RUNNER_TEMP "linux-lock-second-pass"
+          New-Item -ItemType Directory -Path $TargetRoot, $SecondRoot | Out-Null
+
+          $Common = @(
+            "-I", "-m", "piptools", "compile",
+            "--resolver", "backtracking",
+            "--generate-hashes",
+            "--allow-unsafe",
+            "--strip-extras",
+            "--no-header",
+            "--no-annotate",
+            "--no-emit-index-url",
+            "--no-emit-trusted-host",
+            "--no-emit-find-links",
+            "--newline", "lf",
+            "--no-config"
+          )
+          $Runtime = Join-Path $TargetRoot "runtime.txt"
+          $Dev = Join-Path $TargetRoot "dev.txt"
+          $RuntimeSecond = Join-Path $SecondRoot "runtime.txt"
+          $DevSecond = Join-Path $SecondRoot "dev.txt"
+
+          & "${{ steps.target_python.outputs.python-path }}" @Common `
+            --constraint requirements/baseline.in `
+            --output-file $Runtime `
+            pyproject.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "${{ steps.target_python.outputs.python-path }}" @Common `
+            --extra test `
+            --extra reproducibility `
+            --all-build-deps `
+            --constraint requirements/baseline.in `
+            --constraint $Runtime `
+            --output-file $Dev `
+            pyproject.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $LockedResolver = Join-Path $env:RUNNER_TEMP "locked resolver env with spaces"
+          & "${{ steps.target_python.outputs.python-path }}" -I -m venv $LockedResolver
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $LockedPython = Join-Path $LockedResolver "bin/python"
+          & $LockedPython -I -m pip install `
+            --disable-pip-version-check `
+            --no-cache-dir `
+            --only-binary=:all: `
+            --require-hashes `
+            -r $Dev
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $LockedPython -I -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $LockedPython @Common `
+            --constraint requirements/baseline.in `
+            --output-file $RuntimeSecond `
+            pyproject.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $LockedPython @Common `
+            --extra test `
+            --extra reproducibility `
+            --all-build-deps `
+            --constraint requirements/baseline.in `
+            --constraint $RuntimeSecond `
+            --output-file $DevSecond `
+            pyproject.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if ((Get-FileHash -Algorithm SHA256 $Runtime).Hash -ne
+              (Get-FileHash -Algorithm SHA256 $RuntimeSecond).Hash) {
+            throw "runtime lock candidate changed on the second resolver pass"
+          }
+          if ((Get-FileHash -Algorithm SHA256 $Dev).Hash -ne
+              (Get-FileHash -Algorithm SHA256 $DevSecond).Hash) {
+            throw "development lock candidate changed on the second resolver pass"
+          }
+
+          $Report = [ordered]@{
+            schema_version = 1
+            status = "CANDIDATE_ONLY_NOT_ACCEPTANCE"
+            target = $env:TARGET
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            runner_image_os = $env:ImageOS
+            runner_image_version = $env:ImageVersion
+            python = "${{ steps.target_python.outputs.python-version }}"
+            runtime_sha256 = (Get-FileHash -Algorithm SHA256 $Runtime).Hash.ToLowerInvariant()
+            dev_sha256 = (Get-FileHash -Algorithm SHA256 $Dev).Hash.ToLowerInvariant()
+            note = "Review and commit separately; this artifact is not a CI or acceptance pass."
+          }
+          $Report | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath (Join-Path $TargetRoot "candidate-report.json") -Encoding utf8
+
+      - name: Upload review-only Linux lock candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-lock-candidate-${{ matrix.target }}
+          path: ${{ runner.temp }}/linux-lock-candidates/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance:
+    name: Validate ${{ matrix.target }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'validate' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            python-version: "3.12"
+            target: windows-x64-py312
+          - runner: windows-latest
+            python-version: "3.13"
+            target: windows-x64-py313
+          - runner: ubuntu-latest
+            python-version: "3.12"
+            target: linux-x64-py312
+          - runner: ubuntu-latest
+            python-version: "3.13"
+            target: linux-x64-py313
+    env:
+      TARGET: ${{ matrix.target }}
+      RUNTIME_LOCK: requirements/${{ matrix.target }}/runtime.txt
+      DEV_LOCK: requirements/${{ matrix.target }}/dev.txt
+      CI_WHEELHOUSE: ${{ runner.temp }}/w3 wheelhouse
+      CI_SOURCE: ${{ runner.temp }}/source candidate with spaces
+      CI_SOURCE_MANIFEST: ${{ runner.temp }}/clean-source-manifest.json
+      CI_WORK: ${{ runner.temp }}/w3 acceptance with spaces
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up target Python
+        id: target_python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          architecture: x64
+          check-latest: false
+          python-version: ${{ matrix.python-version }}
+
+      - name: Refuse a target without both frozen locks
+        shell: pwsh
+        run: |
+          $Missing = @()
+          foreach ($Lock in @($env:RUNTIME_LOCK, $env:DEV_LOCK)) {
+            if (-not (Test-Path -LiteralPath $Lock -PathType Leaf)) {
+              $Missing += $Lock
+            }
+          }
+          if ($Missing.Count -ne 0) {
+            Write-Error ("Frozen target lock missing; normal CI never resolves locks: " +
+              ($Missing -join ", "))
+            exit 1
+          }
+
+      - name: Bootstrap wheelhouse tooling from the frozen hash lock (online)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "${{ steps.target_python.outputs.python-path }}" -I -m pip install `
+            --disable-pip-version-check `
+            --no-cache-dir `
+            --only-binary=:all: `
+            --require-hashes `
+            -r $env:DEV_LOCK
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare and close the target wheelhouse (online)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "${{ steps.target_python.outputs.python-path }}" -I scripts/prepare_wheelhouse.py `
+            prepare `
+            --python "${{ steps.target_python.outputs.python-path }}" `
+            --target $env:TARGET `
+            --project-root . `
+            --runtime-lock $env:RUNTIME_LOCK `
+            --dev-lock $env:DEV_LOCK `
+            --wheelhouse $env:CI_WHEELHOUSE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Freeze a clean source candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & "${{ steps.target_python.outputs.python-path }}" -I scripts/offline_acceptance.py `
+            snapshot `
+            --source . `
+            --candidate-files reproducibility/candidate-files.txt `
+            --destination $env:CI_SOURCE `
+            --manifest $env:CI_SOURCE_MANIFEST
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Restricted clean install, tests, sample, and packaging
+        shell: pwsh
+        env:
+          TARGET_PYTHON: ${{ steps.target_python.outputs.python-path }}
+          PIP_NO_INDEX: "1"
+          PIP_NO_CACHE_DIR: "1"
+          PYTHONNOUSERSITE: "1"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PIP_CONFIG_FILE = if ($IsWindows) { "NUL" } else { "/dev/null" }
+          $env:PYTHONPATH = ""
+          Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+          Remove-Item Env:PIP_INDEX_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:PIP_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:PIP_FIND_LINKS -ErrorAction SilentlyContinue
+
+          function Invoke-W3Command {
+            param(
+              [Parameter(Mandatory = $true)][string]$Executable,
+              [Parameter(Mandatory = $true)][string[]]$Arguments
+            )
+            if ($IsLinux) {
+              & unshare --user --map-root-user --net -- $Executable @Arguments
+            } else {
+              & $Executable @Arguments
+            }
+            $Code = $LASTEXITCODE
+            if ($Code -ne 0) {
+              throw "restricted command failed with exit code $Code"
+            }
+          }
+
+          function Install-WindowsSocketBlocker {
+            param([Parameter(Mandatory = $true)][string]$Python)
+            if (-not $IsWindows) { return }
+            $Purelib = (& $Python -I -c "import sysconfig; print(sysconfig.get_path('purelib'))").Trim()
+            if ($LASTEXITCODE -ne 0) { throw "cannot locate venv site-packages" }
+            $Blocker = @'
+          import socket
+
+          def _w3_ci_blocked(*args, **kwargs):
+              raise OSError("W3 Windows CI socket blocker")
+
+          socket.create_connection = _w3_ci_blocked
+          socket.getaddrinfo = _w3_ci_blocked
+          socket.socket.connect = _w3_ci_blocked
+          socket.socket.connect_ex = _w3_ci_blocked
+          '@
+            Set-Content -LiteralPath (Join-Path $Purelib "sitecustomize.py") `
+              -Value $Blocker -Encoding utf8
+            Invoke-W3Command $Python @(
+              "-I", "-c",
+              "import socket; assert socket.create_connection.__module__ == 'sitecustomize'"
+            )
+          }
+
+          if ($IsLinux) {
+            & unshare --user --map-root-user --net -- true
+            if ($LASTEXITCODE -ne 0) {
+              throw "an independent no-network namespace is unavailable"
+            }
+          }
+
+          $BuildEnv = Join-Path $env:CI_WORK "build env with spaces"
+          $TestEnv = Join-Path $env:CI_WORK "test env with spaces"
+          $Execution = Join-Path $env:CI_WORK "execution cwd outside source"
+          $DistributionRoot = Join-Path $env:CI_WORK "distributions"
+          $SdistDir = Join-Path $DistributionRoot "sdist"
+          $ExtractRoot = Join-Path $DistributionRoot "extracted sdist with spaces"
+          $WheelDir = Join-Path $DistributionRoot "wheel"
+          $Output = Join-Path $env:CI_WORK "sample output"
+          $EvidenceDir = Join-Path $env:CI_WORK "evidence"
+          $Junit = Join-Path $env:CI_WORK "pytest-results.xml"
+          New-Item -ItemType Directory -Path `
+            $env:CI_WORK, $Execution, $SdistDir, $ExtractRoot, $WheelDir, $EvidenceDir |
+            Out-Null
+
+          Invoke-W3Command $env:TARGET_PYTHON @("-I", "-m", "venv", $BuildEnv)
+          $BuildPython = if ($IsWindows) {
+            Join-Path $BuildEnv "Scripts/python.exe"
+          } else {
+            Join-Path $BuildEnv "bin/python"
+          }
+          Install-WindowsSocketBlocker $BuildPython
+          Invoke-W3Command $BuildPython @(
+            "-I", "-m", "pip", "install",
+            "--no-index", "--no-cache-dir", "--disable-pip-version-check",
+            "--require-hashes", "--find-links", (Join-Path $env:CI_WHEELHOUSE "packages"),
+            "-r", (Join-Path $env:CI_SOURCE $env:DEV_LOCK)
+          )
+          Invoke-W3Command $BuildPython @("-I", "-m", "pip", "check")
+          Invoke-W3Command $BuildPython @(
+            "-I", "-m", "build", "--no-isolation", "--sdist",
+            "--outdir", $SdistDir, $env:CI_SOURCE
+          )
+
+          $ExtractCode = @'
+          from pathlib import Path, PurePosixPath
+          import sys
+          import tarfile
+
+          archives = list(Path(sys.argv[1]).glob("*.tar.gz"))
+          if len(archives) != 1:
+              raise SystemExit("expected exactly one sdist")
+          destination = Path(sys.argv[2])
+          with tarfile.open(archives[0], "r:gz") as handle:
+              members = handle.getmembers()
+              if not members:
+                  raise SystemExit("sdist is empty")
+              names = []
+              roots = set()
+              expected_files = set()
+              for member in members:
+                  pure = PurePosixPath(member.name)
+                  if (
+                      pure.is_absolute()
+                      or not pure.parts
+                      or ".." in pure.parts
+                      or "\\" in member.name
+                      or not (member.isdir() or member.isfile())
+                  ):
+                      raise SystemExit("sdist contains an unsafe member")
+                  normalized = pure.as_posix()
+                  if normalized in names:
+                      raise SystemExit("sdist contains a duplicate member")
+                  names.append(normalized)
+                  roots.add(pure.parts[0])
+                  if member.isfile():
+                      expected_files.add(normalized)
+              if len(roots) != 1:
+                  raise SystemExit("sdist does not have exactly one source root")
+              handle.extractall(destination, filter="data")
+          root_name = next(iter(roots))
+          extracted = destination / root_name
+          if not extracted.is_dir() or extracted.is_symlink():
+              raise SystemExit("extracted source root is unsafe")
+          actual_files = {
+              path.relative_to(destination).as_posix()
+              for path in destination.rglob("*")
+              if path.is_file()
+          }
+          if actual_files != expected_files or any(path.is_symlink() for path in destination.rglob("*")):
+              raise SystemExit("extracted sdist inventory differs from the archive")
+          print(extracted)
+          '@
+          $ExtractedSource = (Invoke-W3Command $BuildPython @(
+            "-I", "-c", $ExtractCode, $SdistDir, $ExtractRoot
+          ) | Select-Object -Last 1).Trim()
+          Invoke-W3Command $BuildPython @(
+            "-I", "-m", "build", "--no-isolation", "--wheel",
+            "--outdir", $WheelDir, $ExtractedSource
+          )
+
+          $ProjectLock = Join-Path $DistributionRoot "project-wheel.txt"
+          $ProjectLockCode = @'
+          from hashlib import sha256
+          from pathlib import Path
+          import sys
+          from packaging.utils import parse_wheel_filename
+
+          wheels = list(Path(sys.argv[1]).glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("expected exactly one project wheel")
+          name, version, _build, _tags = parse_wheel_filename(wheels[0].name)
+          digest = sha256(wheels[0].read_bytes()).hexdigest()
+          Path(sys.argv[2]).write_text(
+              f"{name}=={version} --hash=sha256:{digest}\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          print(wheels[0])
+          '@
+          $Wheel = (Invoke-W3Command $BuildPython @(
+            "-I", "-c", $ProjectLockCode, $WheelDir, $ProjectLock
+          ) | Select-Object -Last 1).Trim()
+
+          Invoke-W3Command $env:TARGET_PYTHON @("-I", "-m", "venv", $TestEnv)
+          $TestPython = if ($IsWindows) {
+            Join-Path $TestEnv "Scripts/python.exe"
+          } else {
+            Join-Path $TestEnv "bin/python"
+          }
+          $Console = if ($IsWindows) {
+            Join-Path $TestEnv "Scripts/weather-pipeline.exe"
+          } else {
+            Join-Path $TestEnv "bin/weather-pipeline"
+          }
+          Install-WindowsSocketBlocker $TestPython
+          Invoke-W3Command $TestPython @(
+            "-I", "-m", "pip", "install",
+            "--no-index", "--no-cache-dir", "--disable-pip-version-check",
+            "--require-hashes", "--find-links", (Join-Path $env:CI_WHEELHOUSE "packages"),
+            "-r", (Join-Path $env:CI_SOURCE $env:DEV_LOCK)
+          )
+          Invoke-W3Command $TestPython @(
+            "-I", "-m", "pip", "install",
+            "--no-index", "--no-cache-dir", "--disable-pip-version-check",
+            "--require-hashes", "--no-build-isolation", "--no-deps",
+            "--find-links", $WheelDir, "-r", $ProjectLock
+          )
+          Invoke-W3Command $TestPython @("-I", "-m", "pip", "check")
+
+          $ImportCode = @'
+          import compileall
+          from pathlib import Path
+          import sys
+          import sichuan_weather
+
+          package = Path(sichuan_weather.__file__).resolve().parent
+          prefix = Path(sys.prefix).resolve()
+          if not package.is_relative_to(prefix):
+              raise SystemExit("installed package import escaped the clean venv")
+          if not compileall.compile_dir(package, quiet=1):
+              raise SystemExit("installed package compilation failed")
+          '@
+          Invoke-W3Command $TestPython @("-I", "-c", $ImportCode)
+
+          Push-Location $Execution
+          try {
+            Invoke-W3Command $Console @("--help")
+            Invoke-W3Command $Console @(
+              "validate",
+              "--input", (Join-Path $env:CI_SOURCE "data/sample/records.jsonl"),
+              "--manifest", (Join-Path $env:CI_SOURCE "data/sample/manifest.json")
+            )
+            Invoke-W3Command $Console @(
+              "run",
+              "--input", (Join-Path $env:CI_SOURCE "data/sample/records.jsonl"),
+              "--manifest", (Join-Path $env:CI_SOURCE "data/sample/manifest.json"),
+              "--output", $Output
+            )
+            Invoke-W3Command $TestPython @(
+              "-I", (Join-Path $env:CI_SOURCE "scripts/check_artifacts.py"),
+              "--output", $Output
+            )
+            Invoke-W3Command $TestPython @(
+              "-I", "-m", "pytest", "--import-mode=importlib", "-p", "no:cacheprovider",
+              "-ra", "-o", "xfail_strict=true", "--junitxml", $Junit,
+              "--basetemp", (Join-Path $env:CI_WORK "pytest temporary root"),
+              (Join-Path $env:CI_SOURCE "tests")
+            )
+          } finally {
+            Pop-Location
+          }
+
+          $JunitCode = @'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(Path(sys.argv[1])).getroot()
+          skipped = sum(1 for case in root.iter("testcase") if case.find("skipped") is not None)
+          if skipped:
+              raise SystemExit(f"contract suite contained {skipped} skipped or xfailed nodes")
+          '@
+          Invoke-W3Command $TestPython @("-I", "-c", $JunitCode, $Junit)
+
+          $Evidence = Join-Path $EvidenceDir ($env:TARGET + ".json")
+          $EvidenceCode = @'
+          from hashlib import sha256
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import sys
+
+          output = Path(sys.argv[1])
+          evidence_path = Path(sys.argv[2])
+          sdist_dir = Path(sys.argv[3])
+          wheel_dir = Path(sys.argv[4])
+          source_manifest = Path(sys.argv[5])
+          runtime_lock = Path(sys.argv[6])
+          dev_lock = Path(sys.argv[7])
+          wheelhouse_manifest = Path(sys.argv[8])
+
+          def digest(path):
+              return sha256(path.read_bytes()).hexdigest()
+
+          business = [
+              "cleaned.csv",
+              "monthly_summary.csv",
+              "quality.json",
+              "summary.csv",
+              "weather_frequency.csv",
+          ]
+          images = [
+              "figures/temperature-ranges.png",
+              "figures/weather-frequency.png",
+          ]
+          distributions = sorted(list(sdist_dir.glob("*.tar.gz")) + list(wheel_dir.glob("*.whl")))
+          if len(distributions) != 2:
+              raise SystemExit("distribution evidence inventory is not exact")
+          document = {
+              "schema_version": 1,
+              "scope": "HOSTED_CI_JOB",
+              "status": "PASS",
+              "target": os.environ["TARGET"],
+              "network_control": (
+                  "linux-unshare-network-namespace"
+                  if platform.system() == "Linux"
+                  else "windows-socket-block-supplemental-only"
+              ),
+              "runner": {
+                  "os": os.environ.get("RUNNER_OS", "unknown"),
+                  "arch": os.environ.get("RUNNER_ARCH", "unknown"),
+                  "image_os": os.environ.get("ImageOS", "unknown"),
+                  "image_version": os.environ.get("ImageVersion", "unknown"),
+              },
+              "python": platform.python_version(),
+              "locks": {
+                  "runtime_sha256": digest(runtime_lock),
+                  "dev_sha256": digest(dev_lock),
+              },
+              "source_manifest_sha256": digest(source_manifest),
+              "wheelhouse_manifest_sha256": digest(wheelhouse_manifest),
+              "business_sha256": {name: digest(output / name) for name in business},
+              "image_sha256": {name: digest(output / name) for name in images},
+              "distribution_sha256": {path.name: digest(path) for path in distributions},
+              "manual_disconnect": False,
+          }
+          evidence_path.write_text(
+              json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          '@
+          Invoke-W3Command $TestPython @(
+            "-I", "-c", $EvidenceCode,
+            $Output,
+            $Evidence,
+            $SdistDir,
+            $WheelDir,
+            $env:CI_SOURCE_MANIFEST,
+            (Join-Path $env:CI_SOURCE $env:RUNTIME_LOCK),
+            (Join-Path $env:CI_SOURCE $env:DEV_LOCK),
+            (Join-Path $env:CI_WHEELHOUSE "manifest.json")
+          )
+
+      - name: Upload sanitized validation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: w3-evidence-${{ matrix.target }}
+          path: ${{ runner.temp }}/w3 acceptance with spaces/evidence/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  compare-business-results:
+    name: Compare four-job business results
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'validate' }}
+    needs: acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up comparison Python
+        id: comparison_python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          architecture: x64
+          check-latest: false
+          python-version: "3.13"
+
+      - name: Download validation evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: w3-evidence-*
+          path: ${{ runner.temp }}/w3-evidence
+          merge-multiple: true
+
+      - name: Compare exact business-output hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Code = @'
+          import json
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          paths = sorted(root.glob("*.json"))
+          if len(paths) != 4:
+              raise SystemExit(f"expected four job evidence files, found {len(paths)}")
+          documents = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+          targets = [document.get("target") for document in documents]
+          expected_targets = [
+              "linux-x64-py312",
+              "linux-x64-py313",
+              "windows-x64-py312",
+              "windows-x64-py313",
+          ]
+          if targets != expected_targets:
+              raise SystemExit("job evidence target inventory is not exact")
+          if any(document.get("status") != "PASS" for document in documents):
+              raise SystemExit("a job evidence file does not report an actual pass")
+          reference = documents[0]["business_sha256"]
+          if any(document["business_sha256"] != reference for document in documents[1:]):
+              raise SystemExit("business-output hashes differ across OS/Python jobs")
+          print("four-job business-output comparison: PASS")
+          '@
+          & "${{ steps.comparison_python.outputs.python-path }}" -I -c $Code `
+            "${{ runner.temp }}/w3-evidence"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

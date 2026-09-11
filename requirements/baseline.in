@@ -1,0 +1,3 @@
+# Compatibility baseline used as a constraint for every target lock.
+matplotlib==3.10.0
+pytest==8.3.4

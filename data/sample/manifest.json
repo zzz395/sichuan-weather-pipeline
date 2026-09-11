@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "dataset_kind": "synthetic",
+  "source_description": "Hand-authored synthetic forecast records for pipeline demonstration and testing.",
+  "locations": [
+    "Chengdu",
+    "Mianyang"
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "sample-a",
+      "snapshot_date": "2026-12-30",
+      "valid_start": "2026-12-30",
+      "valid_end": "2027-01-02"
+    },
+    {
+      "snapshot_id": "sample-b",
+      "snapshot_date": "2026-12-31",
+      "valid_start": "2026-12-31",
+      "valid_end": "2027-01-02"
+    }
+  ]
+}

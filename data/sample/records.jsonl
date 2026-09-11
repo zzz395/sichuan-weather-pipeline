@@ -1,0 +1,14 @@
+{"location":" Chengdu ","snapshot_id":"sample-a","forecast_date_raw":"12-30\n星期三","temperature_raw":"-2～4℃","weather_raw":" Cloudy "}
+{"location":"Chengdu","snapshot_id":"sample-a","forecast_date_raw":"12-31","temperature_raw":"0 ~ 6 °C","weather_raw":"Sunny"}
+{"location":"Chengdu","snapshot_id":"sample-a","forecast_date_raw":"01-01","temperature_raw":"-4~-4℃","weather_raw":"Snow"}
+{"location":"Chengdu","snapshot_id":"sample-a","forecast_date_raw":"2027-01-02","temperature_raw":null,"weather_raw":"Cloudy"}
+{"location":"Mianyang","snapshot_id":"sample-a","forecast_date_raw":"12-30","temperature_raw":"-1~5℃","weather_raw":"Cloudy"}
+{"location":"Mianyang","snapshot_id":"sample-a","forecast_date_raw":"12-31","temperature_raw":"2～8℃","weather_raw":"Sunny"}
+{"location":"Mianyang","snapshot_id":"sample-a","forecast_date_raw":"01-01","temperature_raw":"1.5 ~ 6.5 °C","weather_raw":"Rain"}
+{"location":"Mianyang","snapshot_id":"sample-a","forecast_date_raw":"01-02","temperature_raw":"—","weather_raw":null}
+{"location":"Chengdu","snapshot_id":"sample-a","forecast_date_raw":"2026-12-30","temperature_raw":"-2℃~4℃","weather_raw":"Cloudy"}
+{"location":"Chengdu","snapshot_id":"sample-b","forecast_date_raw":"12-31","temperature_raw":"1~7℃","weather_raw":"Sunny"}
+{"location":"Chengdu","snapshot_id":"sample-b","forecast_date_raw":"01-01","temperature_raw":"-3~1℃","weather_raw":"Cloudy"}
+{"location":"Mianyang","snapshot_id":"sample-b","forecast_date_raw":"01-01","temperature_raw":"2~8℃","weather_raw":"Rain"}
+{"location":"Mianyang","snapshot_id":"sample-b","forecast_date_raw":"01-02","temperature_raw":"3~9℃","weather_raw":"Rain"}
+{"location":"Mianyang","snapshot_id":"sample-a","forecast_date_raw":"12-30","temperature_raw":"-1~5℃","weather_raw":"Cloudy"}

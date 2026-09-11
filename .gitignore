@@ -1,0 +1,49 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.pytest-temp-*/
+.w3-*/
+.w3-pytest-*/
+pytest-cache-files-*/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+wheelhouse/
+
+# W3 local environments, wheelhouses, distributions, and evidence
+.w3/
+
+# Generated pipeline output and temporary files
+output/
+outputs/
+*.tmp
+*.temp
+*.log
+
+# IDE and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
