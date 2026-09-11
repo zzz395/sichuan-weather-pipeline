@@ -195,10 +195,6 @@ jobs:
       TARGET: ${{ matrix.target }}
       RUNTIME_LOCK: requirements/${{ matrix.target }}/runtime.txt
       DEV_LOCK: requirements/${{ matrix.target }}/dev.txt
-      CI_WHEELHOUSE: ${{ runner.temp }}/w3 wheelhouse
-      CI_SOURCE: ${{ runner.temp }}/source candidate with spaces
-      CI_SOURCE_MANIFEST: ${{ runner.temp }}/clean-source-manifest.json
-      CI_WORK: ${{ runner.temp }}/w3 acceptance with spaces
     steps:
       - name: Check out candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,6 +209,21 @@ jobs:
           architecture: x64
           check-latest: false
           python-version: ${{ matrix.python-version }}
+
+      - name: Define runner workspace paths
+        shell: pwsh
+        run: |
+          $Paths = [ordered]@{
+            CI_WHEELHOUSE = Join-Path $env:RUNNER_TEMP "w3 wheelhouse"
+            CI_SOURCE = Join-Path $env:RUNNER_TEMP "source candidate with spaces"
+            CI_SOURCE_MANIFEST = Join-Path $env:RUNNER_TEMP "clean-source-manifest.json"
+            CI_WORK = Join-Path $env:RUNNER_TEMP "w3 acceptance with spaces"
+          }
+          foreach ($Entry in $Paths.GetEnumerator()) {
+            Add-Content -LiteralPath $env:GITHUB_ENV `
+              -Value "$($Entry.Key)=$($Entry.Value)" `
+              -Encoding utf8
+          }
 
       - name: Refuse a target without both frozen locks
         shell: pwsh
